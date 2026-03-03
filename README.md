@@ -64,8 +64,8 @@ The node appears under **loaders/Z-Image** as **Z-Image Turbo LoRA Loader**
   attention_norm.weight [3840]
   ffn_norm.weight       [3840]
   modulation.linear.weight [15360, 3840]  (AdaLN)
+ dim=3840, n_heads=30, n_kv_heads=30, head_dim=128
 ```
 
-dim=3840, n_heads=30, n_kv_heads=30, head_dim=128
 
-MIT
+
