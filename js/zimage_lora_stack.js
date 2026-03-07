@@ -97,6 +97,8 @@ app.registerExtension({
             node.addWidget("button", `✕ Remove LoRA ${next}`, null, () => removeSlot(next));
             const rw = node.widgets.pop();
             rw.name = `remove_${next}`;
+            // FIX: Explicitly prevent this button from polluting the saved workflow data
+            rw.serialize = false; 
             node.widgets.splice(insertAt, 0, rw);
 
             node._visibleSlots = next;
@@ -105,6 +107,8 @@ app.registerExtension({
         };
 
         node.addWidget("button", "+ Add LoRA", null, () => node._addSlot(null));
+        // FIX: Explicitly prevent the Add button from saving as well
+        node.widgets[node.widgets.length - 1].serialize = false; 
 
         // Intercept configure to restore saved slots with their values
         const origConfigure = node.onConfigure?.bind(node);
@@ -114,14 +118,14 @@ app.registerExtension({
             const vals = config.widgets_values;
             if (!vals) return;
 
-            // widgets_values layout: [slot1_lora, slot1_strength, slot1_enabled, slot1_fuse, slot2_lora, ...., add_btn]
-            // last entry is the add button (null), everything before in groups of 4
-            const slotValues = vals.slice(0, -1); // drop the button value
-            const numSlots = Math.floor(slotValues.length / PREFIXES.length);
+            // FIX: Filter out null/undefined to handle varying ComfyUI serialization behavior.
+            // This guarantees we only have the actual data widgets: [lora, strength, enabled, fuse_qkv] per slot.
+            const dataVals = vals.filter(v => v !== null && v !== undefined);
+            const numSlots = Math.floor(dataVals.length / PREFIXES.length);
 
             for (let i = 0; i < numSlots; i++) {
-                const chunk = slotValues.slice(i * PREFIXES.length, (i + 1) * PREFIXES.length);
-                // Only restore if lora isn't None
+                const offset = i * PREFIXES.length;
+                const chunk = dataVals.slice(offset, offset + PREFIXES.length);
                 if (chunk[0] && chunk[0] !== "None") {
                     node._addSlot(chunk);
                 }
