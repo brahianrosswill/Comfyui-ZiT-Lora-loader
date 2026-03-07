@@ -28,7 +28,6 @@ app.registerExtension({
     nodeCreated(node) {
         if (node.comfyClass !== "ZImageTurboLoraStack") return;
 
-        // Pull all slot widgets out into the bank keyed by fixed slot index
         node._slotBank = {};
         for (let i = MAX_SLOTS; i >= 1; i--) {
             const group = [];
@@ -43,7 +42,6 @@ app.registerExtension({
         node.setSize([node.size[0], node.computeSize()[1]]);
 
         function removeSlot(slotNum) {
-            // Shift values from slots above down by one
             for (let i = slotNum; i < node._visibleSlots; i++) {
                 const src = node._slotBank[i + 1];
                 const dst = node._slotBank[i];
@@ -54,29 +52,33 @@ app.registerExtension({
                 }
             }
 
-            // Remove the last visible slot's widgets + divider + remove btn from node.widgets
             const last = node._visibleSlots;
-            const group    = node._slotBank[last];
-            const divider  = node.widgets.find(w => w.name === `divider_${last}`);
+            const group     = node._slotBank[last];
+            const divider   = node.widgets.find(w => w.name === `divider_${last}`);
             const removeBtn = node.widgets.find(w => w.name === `remove_${last}`);
 
-            for (const w of [divider, ...( group ?? []), removeBtn].filter(Boolean)) {
+            for (const w of [divider, ...(group ?? []), removeBtn].filter(Boolean)) {
                 const idx = node.widgets.indexOf(w);
                 if (idx !== -1) node.widgets.splice(idx, 1);
             }
 
-            // Bank slot `last` is still intact and ready for next addSlot
             node._visibleSlots--;
-
             node.setSize([node.size[0], node.computeSize()[1]]);
             app.graph.setDirtyCanvas(true, false);
         }
 
-        function addSlot() {
+        node._addSlot = function(values) {
             const next = node._visibleSlots + 1;
             if (next > MAX_SLOTS) return;
             const group = node._slotBank[next];
             if (!group) return;
+
+            // Restore saved values if provided
+            if (values) {
+                for (let p = 0; p < PREFIXES.length; p++) {
+                    if (group[p] && values[p] !== undefined) group[p].value = values[p];
+                }
+            }
 
             const addBtnIdx = node.widgets.length - 1;
             let insertAt = addBtnIdx;
@@ -100,19 +102,30 @@ app.registerExtension({
             node._visibleSlots = next;
             node.setSize([node.size[0], node.computeSize()[1]]);
             app.graph.setDirtyCanvas(true, false);
-        }
+        };
 
-        node.addWidget("button", "+ Add LoRA", null, addSlot);
-    },
+        node.addWidget("button", "+ Add LoRA", null, () => node._addSlot(null));
 
-    loadedGraphNode(node) {
-        if (node.comfyClass !== "ZImageTurboLoraStack") return;
+        // Intercept configure to restore saved slots with their values
+        const origConfigure = node.onConfigure?.bind(node);
+        node.onConfigure = function(config) {
+            origConfigure?.(config);
 
-        let max = 0;
-        for (const w of node.widgets ?? []) {
-            const m = w.name?.match(/^lora_(\d+)$/);
-            if (m) max = Math.max(max, parseInt(m[1]));
-        }
-        node._visibleSlots = max;
+            const vals = config.widgets_values;
+            if (!vals) return;
+
+            // widgets_values layout: [slot1_lora, slot1_strength, slot1_enabled, slot1_fuse, slot2_lora, ...., add_btn]
+            // last entry is the add button (null), everything before in groups of 4
+            const slotValues = vals.slice(0, -1); // drop the button value
+            const numSlots = Math.floor(slotValues.length / PREFIXES.length);
+
+            for (let i = 0; i < numSlots; i++) {
+                const chunk = slotValues.slice(i * PREFIXES.length, (i + 1) * PREFIXES.length);
+                // Only restore if lora isn't None
+                if (chunk[0] && chunk[0] !== "None") {
+                    node._addSlot(chunk);
+                }
+            }
+        };
     },
 });
