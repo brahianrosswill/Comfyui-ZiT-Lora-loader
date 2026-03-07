@@ -224,3 +224,76 @@ class ZImageTurboLoraLoader:
 
         logger.info(f"[Z-Image LoRA] Converted {len(processed)} keys to Z-Image format")
         return converted
+
+
+_LORA_OPTS = ["None"] + folder_paths.get_filename_list("loras")
+_MAX_SLOTS = 10
+
+
+class ZImageTurboLoraStack(ZImageTurboLoraLoader):
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        optional = {}
+        for i in range(1, _MAX_SLOTS + 1):
+            optional[f"lora_{i}"]     = (_LORA_OPTS,)
+            optional[f"strength_{i}"] = ("FLOAT", {"default": 1.0, "min": -20.0, "max": 20.0, "step": 0.01})
+            optional[f"enabled_{i}"]  = ("BOOLEAN", {"default": True, "label_on": "On", "label_off": "Off"})
+            optional[f"fuse_qkv_{i}"] = ("BOOLEAN", {"default": True, "label_on": "Fuse QKV", "label_off": "Direct"})
+        return {
+            "required": {
+                "model": ("MODEL",),
+            },
+            "optional": optional,
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "load_loras"
+    CATEGORY = "loaders/Z-Image"
+    TITLE = "Z-Image Turbo LoRA Stack"
+
+    def load_loras(self, model, **kwargs):
+        if not isinstance(model.model, comfy.model_base.Lumina2):
+            logger.warning(
+                f"[Z-Image LoRA Stack] Model is {type(model.model).__name__}, not Lumina2/Z-Image Turbo. "
+                "Key mapping may not work correctly."
+            )
+
+        key_map = self._build_key_map(model)
+        current = model
+
+        for i in range(1, _MAX_SLOTS + 1):
+            name     = kwargs.get(f"lora_{i}", "None")
+            strength = kwargs.get(f"strength_{i}", 1.0)
+            enabled  = kwargs.get(f"enabled_{i}", True)
+            fuse_qkv = kwargs.get(f"fuse_qkv_{i}", True)
+
+            if not enabled or name == "None" or strength == 0:
+                continue
+
+            lora_path = folder_paths.get_full_path("loras", name)
+            lora_sd = comfy.utils.load_torch_file(lora_path, safe_load=True)
+            logger.info(f"[Z-Image LoRA Stack] Slot {i}: {name} ({len(lora_sd)} keys, strength={strength}, fuse_qkv={fuse_qkv})")
+
+            if fuse_qkv and self._has_separate_qkv(lora_sd):
+                lora_sd = self._convert_to_fused_qkv(lora_sd, current)
+
+            patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
+            logger.info(f"[Z-Image LoRA Stack] Slot {i}: applied {len(patch_dict)} patches")
+
+            next_model = current.clone()
+            next_model.add_patches(patch_dict, strength_patch=strength, strength_model=1.0)
+            current = next_model
+
+        return (current,)
+
+
+NODE_CLASS_MAPPINGS = {
+    "ZImageTurboLoraLoader": ZImageTurboLoraLoader,
+    "ZImageTurboLoraStack":  ZImageTurboLoraStack,
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "ZImageTurboLoraLoader": "Z-Image Turbo LoRA Loader",
+    "ZImageTurboLoraStack":  "Z-Image Turbo LoRA Stack",
+}
